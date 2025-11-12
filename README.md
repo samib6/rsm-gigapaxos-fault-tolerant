@@ -17,11 +17,13 @@ The goal of this assignment is to use consensus to build a fault-tolerant replic
 
 1. Java is required; unix is strongly recommended but not necessary for any of the three options above;
 
-2. Familiarity with the [replicated consistent (non-fault-tolerant) datastore programming assignment (PA2)](https://bitbucket.org/avenka/590cc/src/master/consistency/);
+2. Familiarity with the [replicated consistent (non-fault-tolerant) datastore programming assignment (PA2)](https://bitbucket.org/distrsys/consistent-db/src/master/);
 
 3. Completion of [consensus and RSM tutorials (Part 1)](https://bitbucket.org/distrsys/consensus-rsm-tutorials/src/master/README.md?mode=edit&at=master).
 
-You are already familiar with the application environment and background here having completed prerequisite #2 above. The goal in this assignment is to make your previous replicated, consistent, non-fault-tolerant datastore fault-tolerant now using at least two of the three options listed in Goal above.
+You are already familiar with the application environment and background here having completed prerequisite #2 above. Sample solutions for PA2 if you need them are provided in files starting with AVDB* and can be tested by setting `STUDENT_TESTING_MODE` (or `GRADING_MODE` in the PA2 repo) to false.
+
+The goal in this assignment is to make your previous replicated, linearizable consistent, non-fault-tolerant datastore fault-tolerant now using at least two of the three options listed in Goal above.
 
 ***
 
@@ -34,7 +36,7 @@ Your work will use exactly one (not both) of the two files in the `faulttoleranc
 
 2. [`MyDBFaultTolerantServerZK`](https://bitbucket.org/distrsys/fault-tolerant-db/src/master/src/server/faulttolerance/MyDBFaultTolerantServerZK.java) otherwise.
 
-You may create as many additional code files as needed in the `faulttolerance` package to support your implementation.
+You may create as many additional code files as needed in the `faulttolerance` package to support your implementation. 
 ***
 
 ### Test code files ###
@@ -42,7 +44,7 @@ The test code (what used to be [`Grader`] for consistency-only tests) has evolve
 
 1. [`GraderCommonSetup`](https://bitbucket.org/distrsys/fault-tolerant-db/src/master/test/GraderCommonSetup.java): Common setup code for both consistency and fault tolerance tests.
 
-2. [`GraderConsistency`](https://bitbucket.org/distrsys/fault-tolerant-db/src/master/test/GraderConsistency.java): Tests same as the old consistency tests in [`Grader`] (https://bitbucket.org/distrsys/consistent-db/src/master/test/Grader.java).
+2. [`GraderConsistency`](https://bitbucket.org/distrsys/fault-tolerant-db/src/master/test/GraderConsistency.java): Tests same as the old consistency tests in [`Grader`] (https://bitbucket.org/distrsys/consistent-db/src/master/test/Grader.java).  
 
 3. [`GraderFaultTolerance`](https://bitbucket.org/distrsys/fault-tolerant-db/src/master/test/GraderFaultTolerance.java): Setup and tests for testing fault tolerance, the primary testing focus of this assignment, inherited from `GraderCommonSetup`. The documentation of the tests in this class should be self-explanatory.
 
