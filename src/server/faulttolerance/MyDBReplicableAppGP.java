@@ -1,150 +1,235 @@
 package server.faulttolerance;
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
 import edu.umass.cs.gigapaxos.interfaces.Replicable;
 import edu.umass.cs.gigapaxos.interfaces.Request;
+import edu.umass.cs.gigapaxos.paxospackets.RequestPacket;
 import edu.umass.cs.nio.interfaces.IntegerPacketType;
-import edu.umass.cs.nio.interfaces.NodeConfig;
-import edu.umass.cs.nio.nioutils.NIOHeader;
-import edu.umass.cs.nio.nioutils.NodeConfigUtils;
 import edu.umass.cs.reconfiguration.reconfigurationutils.RequestParseException;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
-/**
- * This class should implement your {@link Replicable} database app if you wish
- * to use Gigapaxos.
- * <p>
- * Make sure that both a single instance of Cassandra is running at the default
- * port on localhost before testing.
- * <p>
- * Tips:
- * <p>
- * 1) No server-server communication is permitted or necessary as you are using
- * gigapaxos for all that.
- * <p>
- * 2) A {@link Replicable} must be agnostic to "myID" as it is a standalone
- * replication-agnostic application that via its {@link Replicable} interface is
- * being replicated by gigapaxos. However, in this assignment, we need myID as
- * each replica uses a different keyspace (because we are pretending different
- * replicas are like different keyspaces), so we use myID only for initiating
- * the connection to the backend data store.
- * <p>
- * 3) This class is never instantiated via a main method. You can have a main
- * method for your own testing purposes but it won't be invoked by any of
- * Grader's tests.
- */
 public class MyDBReplicableAppGP implements Replicable {
 
-	/**
-	 * Set this value to as small a value with which you can get tests to still
-	 * pass. The lower it is, the faster your implementation is. Grader* will
-	 * use this value provided it is no greater than its MAX_SLEEP limit.
-	 * Faster
-	 * is not necessarily better, so don't sweat speed. Focus on safety.
-	 */
-	public static final int SLEEP = 1000;
+    public static final int SLEEP = 1000;
+    private static final String DEFAULT_TABLE_NAME = "grade";
 
-	/**
-	 * All Gigapaxos apps must either support a no-args constructor or a
-	 * constructor taking a String[] as the only argument. Gigapaxos relies on
-	 * adherence to this policy in order to be able to reflectively construct
-	 * customer application instances.
-	 *
-	 * @param args Singleton array whose args[0] specifies the keyspace in the
-	 *             backend data store to which this server must connect.
-	 *             Optional args[1] and args[2]
-	 * @throws IOException
-	 */
-	public MyDBReplicableAppGP(String[] args) throws IOException {
-		// TODO: setup connection to the data store and keyspace
-		throw new RuntimeException("Not yet implemented");
-	}
+    private Cluster cluster;
+    private Session session;
+    private final String keyspace;
+    
+    // *CRITICAL: Cache prepared statements*
+    private PreparedStatement insertPrepared;
+    private PreparedStatement restorePrepared;
 
-	/**
-	 * Refer documentation of {@link Replicable#execute(Request, boolean)} to
-	 * understand what the boolean flag means.
-	 * <p>
-	 * You can assume that all requests will be of type {@link
-	 * edu.umass.cs.gigapaxos.paxospackets.RequestPacket}.
-	 *
-	 * @param request
-	 * @param b
-	 * @return
-	 */
-	@Override
-	public boolean execute(Request request, boolean b) {
-		// TODO: submit request to data store
-		throw new RuntimeException("Not yet implemented");
-	}
+    public MyDBReplicableAppGP(String[] args) throws IOException {
+        if (args == null || args.length == 0 || args[0] == null || args[0].trim().isEmpty()) {
+            throw new IllegalArgumentException("Expect args[0] = keyspace");
+        }
+        this.keyspace = args[0].trim();
 
-	/**
-	 * Refer documentation of
-	 * {@link edu.umass.cs.gigapaxos.interfaces.Application#execute(Request)}
-	 *
-	 * @param request
-	 * @return
-	 */
-	@Override
-	public boolean execute(Request request) {
-		// TODO: execute the request by sending it to the data store
-		throw new RuntimeException("Not yet implemented");
-	}
+        this.cluster = Cluster.builder().addContactPoint("127.0.0.1").build();
+        this.session = cluster.connect();
 
-	/**
-	 * Refer documentation of {@link Replicable#checkpoint(String)}.
-	 *
-	 * @param s
-	 * @return
-	 */
-	@Override
-	public String checkpoint(String s) {
-		// TODO:
-		throw new RuntimeException("Not yet implemented");
-	}
+        try {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keyspace
+                    + " WITH replication = {'class':'SimpleStrategy','replication_factor':1};");
+        } catch (Exception e) {
+            System.err.println("Warning: could not create keyspace " + keyspace + " : " + e);
+        }
 
-	/**
-	 * Refer documentation of {@link Replicable#restore(String, String)}
-	 *
-	 * @param s
-	 * @param s1
-	 * @return
-	 */
-	@Override
-	public boolean restore(String s, String s1) {
-		// TODO:
-		throw new RuntimeException("Not yet implemented");
+        try {
+            session.execute("CREATE TABLE IF NOT EXISTS " + keyspace + "." + DEFAULT_TABLE_NAME
+                    + " (id int PRIMARY KEY, events list<int>);");
+        } catch (Exception e) {
+            System.err.println("Warning: could not ensure table " + keyspace + "." + DEFAULT_TABLE_NAME + " : " + e);
+        }
+        
+        // *CRITICAL: Prepare statements once during initialization*
+        this.insertPrepared = session.prepare(
+            "INSERT INTO " + keyspace + "." + DEFAULT_TABLE_NAME + " (id, events) VALUES (?, ?);"
+        );
+        this.restorePrepared = session.prepare(
+            "INSERT INTO " + keyspace + "." + DEFAULT_TABLE_NAME + " (id, events) VALUES (?, ?);"
+        );
+        
+        System.out.println("MyDBReplicableAppGP initialized for keyspace: " + keyspace);
+    }
 
-	}
+    private String maybeQualifyKeyspace(String sql) {
+        if (sql == null) return null;
+        
+        if (sql.contains(keyspace + "." + DEFAULT_TABLE_NAME)) {
+            return sql;
+        }
+        
+        String qualified = sql.replaceAll("\\b" + DEFAULT_TABLE_NAME + "\\b", 
+                                           keyspace + "." + DEFAULT_TABLE_NAME);
+        
+        System.out.println("Qualified: " + sql + " -> " + qualified);
+        return qualified;
+    }
 
+    @Override
+    public boolean execute(Request request, boolean doNotReplyToClient) {
+        return execute(request);
+    }
 
-	/**
-	 * No request types other than {@link edu.umass.cs.gigapaxos.paxospackets
-	 * .RequestPacket will be used by Grader, so you don't need to implement
-	 * this method.}
-	 *
-	 * @param s
-	 * @return
-	 * @throws RequestParseException
-	 */
-	@Override
-	public Request getRequest(String s) throws RequestParseException {
-		return null;
-	}
+    @Override
+public boolean execute(Request request) {
+    try {
+        String sql = null;
+        
+        if (request instanceof RequestPacket) {
+            RequestPacket rp = (RequestPacket) request;
+            Object reqValue = rp.requestValue;
+            if (reqValue != null) {
+                sql = reqValue.toString();
+            }
+        }
+        
+        if (sql == null || sql.trim().isEmpty()) {
+            String jsonStr = request.toString();
+            int qvStart = jsonStr.indexOf("\"QV\":\"");
+            if (qvStart != -1) {
+                qvStart += 6;
+                int qvEnd = jsonStr.indexOf("\"", qvStart);
+                if (qvEnd > qvStart) {
+                    sql = jsonStr.substring(qvStart, qvEnd);
+                }
+            }
+        }
+        
+        if (sql == null || sql.trim().isEmpty()) {
+            System.err.println("Could not extract SQL from: " + request);
+            return false;
+        }
+        
+        String qualifiedSql = maybeQualifyKeyspace(sql.trim());
+        
+        System.out.println("Executing: " + qualifiedSql);
+        
+        // Just execute everything normally - no special handling
+        session.execute(qualifiedSql);
+        
+        System.out.println("✓ Success");
+        return true;
+        
+    } catch (Exception e) {
+        System.err.println("execute() failed: " + e.getMessage());
+        e.printStackTrace();
+        return false;
+    }
+}
+    @Override
+    public String checkpoint(String name) {
+        try {
+            System.out.println("CHECKPOINT called for " + keyspace);
+            
+            ResultSet rs = session.execute("SELECT id, events FROM " + keyspace + "." + DEFAULT_TABLE_NAME + ";");
 
-	/**
-	 * @return Return all integer packet types used by this application. For an
-	 * example of how to define your own IntegerPacketType enum, refer {@link
-	 * edu.umass.cs.reconfiguration.examples.AppRequest}. This method does not
-	 * need to be implemented because the assignment Grader will only use
-	 * {@link
-	 * edu.umass.cs.gigapaxos.paxospackets.RequestPacket} packets.
-	 */
-	@Override
-	public Set<IntegerPacketType> getRequestTypes() {
-		return new HashSet<IntegerPacketType>();
-	}
+            org.json.JSONObject root = new org.json.JSONObject();
+
+            int rowCount = 0;
+            for (Row r : rs) {
+                int id = r.getInt("id");
+                
+                // Handle null events column
+                List<Integer> events = r.getList("events", Integer.class);
+                
+                if (events == null) {
+                    events = new ArrayList<>();
+                }
+                
+                root.put(String.valueOf(id), events);
+                rowCount++;
+            }
+            
+            String checkpointState = root.toString();
+            System.out.println("✓ Checkpoint completed: " + rowCount + " rows, size=" + checkpointState.length() + " chars");
+            
+            return checkpointState;
+        } catch (Exception e) {
+            System.err.println("checkpoint() failed: " + e.getMessage());
+            e.printStackTrace();
+            return "{}";
+        }
+    }
+
+    @Override
+    public boolean restore(String name, String state) {
+        try {
+            System.out.println("RESTORE called for " + keyspace + " with state length=" + 
+                             (state != null ? state.length() : 0));
+            
+            session.execute("TRUNCATE " + keyspace + "." + DEFAULT_TABLE_NAME + ";");
+
+            if (state == null || state.trim().isEmpty() || state.trim().equals("{}")) {
+                System.out.println("✓ Restore completed: empty state");
+                return true;
+            }
+
+            org.json.JSONObject root = new org.json.JSONObject(state);
+
+            var keys = root.names();
+            if (keys == null) {
+                System.out.println("✓ Restore completed: no keys");
+                return true;
+            }
+
+            for (int i = 0; i < keys.length(); i++) {
+                String key = keys.getString(i);
+
+                int id = Integer.parseInt(key);
+                
+                // Check if the value is null or JSONArray
+                Object value = root.get(key);
+                
+                List<Integer> events = new ArrayList<>();
+                
+                if (value != null && value instanceof org.json.JSONArray) {
+                    org.json.JSONArray arr = (org.json.JSONArray) value;
+                    for (int j = 0; j < arr.length(); j++) {
+                        events.add(arr.getInt(j));
+                    }
+                }
+
+                System.out.println("Restoring: id=" + id + ", events=" + events + " (size=" + events.size() + ")");
+                
+                // Use CACHED prepared statement
+                session.execute(restorePrepared.bind(id, events));
+            }
+
+            System.out.println("✓ Restore completed for keyspace: " + keyspace + ", restored " + keys.length() + " keys");
+            
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("restore() failed: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    @Override
+    public Request getRequest(String s) throws RequestParseException {
+        try {
+            return new RequestPacket(new org.json.JSONObject(s));
+        } catch (Exception e) {
+            throw new RequestParseException(e);
+        }
+    }
+
+    @Override
+    public Set<IntegerPacketType> getRequestTypes() {
+        return new HashSet<IntegerPacketType>();
+    }
 }
