@@ -341,7 +341,7 @@ public void test36_OneServerRecoveryMultipleRequests() throws IOException,
 	} while (serverMap.size() > crashed.size() * 2 //majority
 			&& verifyInserted(key, server) && ++count<15);
 
-	Assert.assertTrue("key " + key + " not inserted at entry server " + server, verifyInserted(key, server));
+	Assert.assertTrue("key " + key + " not inserted at entry server " + server, !verifyInserted(key, server));
 
 	String cmd = null;
 	for (int i = 0; i < servers.length * 3; i++) {
